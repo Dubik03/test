@@ -1,0 +1,655 @@
+#include <Arduino.h>             //This is the main header file for Arduino that includes essential functions and definitions for working with Arduino boards.
+#include <avr/wdt.h>             //This library provides functions for working with the watchdog timer, which is a hardware timer that can reset the microcontroller if it hangs or crashes.
+#include <DallasTemperature.h>   //This library is used for working with Dallas Semiconductor temperature sensors, such as the DS18B20, which can measure temperature with high precision.
+#include <EEPROM.h>              //This library provides functions for reading and writing data to the EEPROM (Electrically Erasable Programmable Read-Only Memory) of the Arduino board, which is a non-volatile memory that retains data even when the power is turned off.
+#include <OneWire.h>             //This library is used for communication with devices that use the OneWire protocol, such as Dallas Semiconductor temperature sensors and DS2401 serial number chips.
+#include <RTClib.h>              //This library is used for working with real-time clocks (RTCs) that keep track of date and time even when the Arduino board is powered off.
+#include <RCSwitch.h>            //This library is used for working with radio frequency (RF) transmitters and receivers, allowing you to send and receive data wirelessly.
+#include <SdFat.h>               //This library is used for reading and writing data to SD cards, which are commonly used for data logging and storage in Arduino projects.
+#include <SPI.h>                 //This library provides functions for communication over the Serial Peripheral Interface (SPI) bus, which is a synchronous serial communication protocol used for communication between microcontrollers and peripheral devices.
+#include <UTFT.h>                //These libraries are used for working with TFT (Thin-Film Transistor) displays, providing functions for drawing graphics and text on the display.
+#include <UTFT_SdRaw.h>          //These libraries are used for working with TFT (Thin-Film Transistor) displays, providing functions for drawing graphics and text on the display.
+#include <UTouch.h>              //This library is used for working with touchscreens, providing functions for detecting touch events and reading touch coordinates.
+#include <Wire.h>                //This library is used for communication over the I2C (Inter-Integrated Circuit) bus, which is a serial communication protocol used for communication between microcontrollers and peripheral devices.
+#include <NewPing.h>             //This library is used for working with ultrasonic sensors, which can measure distance using sound waves.
+#include <sx1509_library.h>      //This library is used for working with SX1509 I/O expanders, which allow you to increase the number of I/O pins on your Arduino board.
+#include <Thread.h>              //These libraries are used for implementing multithreading in Arduino projects, allowing you to run multiple tasks concurrently.
+#include <ThreadController.h>    //These libraries are used for implementing multithreading in Arduino projects, allowing you to run multiple tasks concurrently.
+
+
+/**EEPROM
+    HIGH_TEMP = (EEPROM.read(0)); highest temperature
+    LOW_TEMP = (EEPROM.read(1));  lowest temperature
+*/
+
+// Constants
+const byte ONE_WIRE_BUS = 10;
+const byte PING_PIN = 18;
+const byte INTERRUPT_PIN = 2;
+const byte RESET_PIN = 8;
+const byte SD_CHIP_SELECT = 53;
+const byte vetrak = 1;
+const byte topeni = 2;
+const byte SX1509_ADDRESS = 0x3E;
+int UpperLowerUpdate; // after disconnecting and connecting power we need to refresh home screen once
+
+float HIGH_TEMP = 27.0;
+float LOW_TEMP = 25.0;
+const float Temp = 25.01;
+
+const int BUTTON_WIDTH = 2;
+const int BUTTON_HEIGHT = 3;
+
+struct RGB
+    {
+    byte r;
+    byte g;
+    byte b;
+    };
+typedef struct RGB Color;
+
+const Color col_white = {255, 255, 255};
+const Color col_black = {255, 255, 255};
+const Color col_blue = {0, 0, 255};
+const Color col_red = {255, 0, 0};
+
+const short SettingsButtonCoord[] = {362, 613, 458, 710};
+const short BottomButtonCoord[] = {215, 746, 263, 795}; //used @ all screens
+const short BUTTON_COORDS[] = {0, 0, 0, 0};
+const short ClockCord[] = {68, 240, 142, 314};
+const short HourUp[] = {175, 220, 223, 268};
+const short HourDown[] = {175, 273, 223, 321};
+const short MinuteUp[] = {347, 220, 395, 268};
+const short MinuteDown[] = {347, 273, 395, 321};
+const short DayUp[] = {110, 391, 158, 439};
+const short DayDown[] = {110, 444, 158, 492};
+const short MonthUp[] = {220, 391, 268, 439};
+const short MonthDown[] = {220, 444, 268, 492};
+const short YearUp[] = {380, 391, 428, 439};
+const short YearDown[] = {380, 444, 428, 492};
+const short SetClockCord[] = {156, 600, 324, 652}; 
+const short HeatCord[] = {248, 240, 322, 314};
+const short SetPowerSchedCord[] = {300, 680, 465, 732}; //also used for Light scenes
+const short CancelPowerSchedCord[] = {22, 680, 190, 732}; //also used for light scenes
+const short powLightOnHourUp[] = {275, 110, 323, 158};
+const short powLightOnHourDown[] = {275, 163, 323, 211};
+const short powLightOnMinuteUp[] = {412, 110, 460, 158};
+const short powLightOnMinuteDown[] = {412, 163, 460, 211};
+const short powLightOffHourUp[] = {275, 240, 323, 288};
+const short powLightOffHourDown[] = {275, 293, 323, 341};
+const short powLightOffMinuteUp[] = {412, 240, 460, 288};
+const short powLightOffMinuteDown[] = {412, 293, 460, 341};
+const short powCo2OnHourUp[] = {275, 410, 323, 458};
+const short powCo2OnHourDown[] = {275, 463, 323, 511};
+const short powCo2OnMinuteUp[] = {412, 410, 460, 458};
+const short powCo2OnMinuteDown[] = {412, 463, 460, 511};
+const short powCo2OffHourUp[] = {275, 540, 323, 588};
+const short powCo2OffHourDown[] = {275, 593, 323, 641};
+const short powCo2OffMinuteUp[] = {412, 540, 460, 588};
+const short powCo2OffMinuteDown[] = {412, 593, 460, 641};
+
+
+const char* DAYS_OF_WEEK[] = {"Nedele", "Pondeli", "Utery", "Streda", "Ctvrtek", "Patek", "Sobota"};
+const char* MONTHS[] = {"", "Leden", "Unor", "Brezen", "Duben", "Kveten", "Cerven", "Cervenec", "Srpen", "Zari", "Rijen", "Listopad", "Prosinec"};
+
+// External
+extern uint8_t BigFont[];
+extern uint8_t UbuntuBold[];
+extern uint8_t SevenSegmentFull[];
+extern uint8_t OCR_A_Extended_M[];
+
+// Objects
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature sensors(&oneWire); 
+RTC_DS1307 rtc;
+SdFat sd;
+UTFT myGLCD(ITDB50, 38, 39, 40, 41); 
+UTouch myTouch(6, 5, 4, 3, 2); 
+UTFT_SdRaw myFiles(&myGLCD);
+sx1509Class sx1509(SX1509_ADDRESS);
+
+
+//Variables
+byte currentPage = 1;
+byte lastScreen = 255;        
+
+unsigned long currentMillis; // get current millis
+unsigned long prevMillisTouch = 0;
+unsigned long prevMillis1sec = 0; //track 1 second
+unsigned long prevMillis5sec = 0; // track 5 seconds for refreshing clock and temp
+unsigned long prevMillis1min = 0; // track 60 seconds for refreshing
+unsigned long prevMillis15min = 0; //track 15 minutes
+
+boolean Regul = true;
+
+byte put_TempIndex = 0;
+
+DateTime now;
+DateTime adjustTimer;
+
+
+    int x, y;
+/////////////////////////////////////////////////////////////////
+
+
+#define RELAY_HEATING_PIN 11
+#define RELAY_COOLING_PIN 12
+///////////////////////////////////////////////////////////////// temp regulation
+Thread regulaceThread = Thread();
+unsigned long lastRegulaceMillis = 0;
+
+////////////////////////////////////////////////////////////////////
+void setup() {
+//init display
+
+///////////////////////////
+regulaceThread.onRun(regulace);
+  regulaceThread.setInterval(5000);
+/////////////////////////////
+myGLCD.InitLCD();
+myGLCD.clrScr();
+myGLCD.InitLCD(PORTRAIT);
+myTouch.InitTouch(PORTRAIT);
+myTouch.setPrecision(PREC_EXTREME);
+      
+Serial.begin(115200);
+Serial1.begin(115200); //ESP komunikace
+sd.begin(SD_CHIP_SELECT, SPI_FULL_SPEED);
+Wire.begin();
+sx1509.init();
+rtc.begin();
+sensors.begin();
+DateTime now = rtc.now();
+sx1509.pinDir(vetrak, OUTPUT);
+sx1509.pinDir(topeni, OUTPUT);
+
+readTempValue();
+UpperLowerUpdate = 1; // after disconnecting and connecting power we need to refresh home screen once
+
+//////////////////////////////////////////////////////////////////
+  pinMode(RELAY_HEATING_PIN, OUTPUT);
+  pinMode(RELAY_COOLING_PIN, OUTPUT);
+  digitalWrite(RELAY_HEATING_PIN, LOW);
+ digitalWrite(RELAY_COOLING_PIN, LOW);
+//////////////////////////////////////////////////////////////////
+
+}
+
+void loop() {
+  
+    wdt_reset();
+ //touched coordinates
+if (UpperLowerUpdate == 1) // after disconnecting and connecting power we need to refresh home screen once
+{
+    //myGLCD.clrScr();
+    drawScreen();
+    Serial.println("Test read once in loop");
+    UpperLowerUpdate = 0;
+}
+
+regulaceThread.run();
+
+ currentMillis = millis(); // get current millis
+
+    if (myTouch.dataAvailable()) //read x,y when button is touched
+
+	    {
+	    myTouch.read();
+	    x = myTouch.getX();
+	    y = myTouch.getY();
+	    prevMillisTouch = currentMillis;
+
+        switch (currentPage)
+        {
+            // Capture Buttons
+            case 1:  // home screen
+                if (buttonPressed(SettingsButtonCoord)) {
+                  //waitForIt(SettingsButtonCoord);
+                    currentPage = 2;
+                    drawScreen();
+                } else if (buttonPressed(BottomButtonCoord)) {
+                  //waitForIt(BottomButtonCoord);
+                    currentPage = 1;
+                    printDateTime(now, 5, 5);		 
+                    drawScreen();
+                }
+                break;
+            case 2:
+		if (buttonPressed(ClockCord)) 
+		    {
+		    //waitForIt(ClockCord);
+		    currentPage = 3;
+		    adjustTimer = rtc.now();
+		    adjustTimer = adjustTimer.unixtime() + 60
+			    - adjustTimer.second();
+		    drawScreen();
+		    }
+
+      else if (buttonPressed(HeatCord))
+		    {
+		    //waitForIt(HeatCord);
+		    currentPage = 4;
+		    drawScreen();
+		    } 
+               
+		else if (buttonPressed(BottomButtonCoord)) // homebutton
+		    {
+		    waitForIt(BottomButtonCoord);
+		    currentPage = 1;
+		    drawScreen();
+		    }
+		break;
+            case 3:
+		if (buttonPressed(SetClockCord)) // homebutton
+		    {
+		    //waitForIt(SetClockCord);
+		    rtc.adjust(adjustTimer);
+		    currentPage = 2;
+		    drawScreen();
+		    }
+		else if (buttonPressed(HourUp)) // homebutton
+		    {
+		    //waitForIt(HourUp);
+		    adjustTimer = adjustTimer.unixtime() + 3600;
+		    TimeUpdate();
+		    }
+		else if (buttonPressed(HourDown)) // homebutton
+		    {
+		    //waitForIt(HourDown);
+		    adjustTimer = adjustTimer.unixtime() - 3600;
+		    TimeUpdate();
+		    }
+		else if (buttonPressed(MinuteUp)) // homebutton
+		    {
+		    //waitForIt(MinuteUp);
+		    adjustTimer = adjustTimer.unixtime() + 60;
+		    TimeUpdate();
+		    }
+		else if (buttonPressed(MinuteDown)) // homebutton
+		    {
+		    //waitForIt(MinuteDown);
+		    adjustTimer = adjustTimer.unixtime() - 60;
+		    TimeUpdate();
+		    }
+		else if (buttonPressed(DayUp)) // homebutton
+		    {
+		    //waitForIt(DayUp);
+		    adjustTimer = adjustTimer.unixtime() + 86400;
+		    TimeUpdate();
+		    }
+		else if (buttonPressed(DayDown)) // homebutton
+		    {
+		    //waitForIt(DayDown);
+		    adjustTimer = adjustTimer.unixtime() - 86400;
+		    TimeUpdate();
+		    }
+		else if (buttonPressed(MonthUp)) // homebutton
+		    {
+		    //waitForIt(MonthUp);
+		    adjustTimer = adjustTimer.unixtime() + (30 * 86400);
+		    TimeUpdate();
+		    }
+		else if (buttonPressed(MonthDown)) // homebutton
+		    {
+		    //waitForIt(MonthDown);
+		    adjustTimer = adjustTimer.unixtime() - (30 * 86400L);
+		    TimeUpdate();
+		    }
+		else if (buttonPressed(YearUp)) // homebutton
+		    {
+		    //waitForIt(YearUp);
+		    adjustTimer = adjustTimer.unixtime() + (365 * 86400);
+		    TimeUpdate();
+		    }
+		else if (buttonPressed(YearDown)) // homebutton
+		    {
+		    //waitForIt(YearDown);
+		    adjustTimer = adjustTimer.unixtime() - (365 * 86400);
+		    TimeUpdate();
+		    }
+		else if (buttonPressed(BottomButtonCoord)) // homebutton
+		    {
+		    //waitForIt(BottomButtonCoord);
+		    currentPage = 1;
+		    drawScreen();
+		    }
+		break;
+    
+case 4:  //  heater screen
+		if (buttonPressed(BottomButtonCoord)) 
+		    {
+		    //waitForIt(BottomButtonCoord);
+		    currentPage = 1;
+		    drawScreen();
+		    }
+		else if (buttonPressed(powLightOffMinuteUp))
+	
+		    {
+		    //waitForIt(powLightOffMinuteUp);
+		    HIGH_TEMP += 1;
+		    updateHeaterScreen();
+		    }
+		else if (buttonPressed(powLightOffMinuteDown)) 
+		    {
+		    //waitForIt(powLightOffMinuteDown);
+		      HIGH_TEMP -= 1;
+		    updateHeaterScreen();
+		    }
+		else if (buttonPressed(powCo2OnMinuteUp)) 
+		    {
+		    //waitForIt(powCo2OnMinuteUp);
+		    LOW_TEMP += 1;
+		    updateHeaterScreen();
+		    }
+		else if (buttonPressed(powCo2OnMinuteDown)) 
+		    {
+		    //waitForIt(powCo2OnMinuteDown);
+		    LOW_TEMP -= 1;
+		    updateHeaterScreen();
+		    }
+		else if (buttonPressed(SetPowerSchedCord)) 
+		    {
+		    //waitForIt(SetPowerSchedCord);
+		    saveTempValue();
+		    currentPage = 2;
+		    drawScreen();
+		    }
+		else if (buttonPressed(CancelPowerSchedCord)) 
+		    {
+		    //waitForIt(CancelPowerSchedCord);
+		    readTempValue();
+		    currentPage = 2;
+		    drawScreen();
+		    }
+		break;     
+
+        }
+    }
+
+    
+if (!myTouch.dataAvailable())
+	{
+
+
+	if (currentMillis - prevMillis5sec > 5000) //if 5 seconds are over update our data
+	    {
+	    prevMillis5sec = millis();
+
+	    }
+
+	
+if (currentMillis - prevMillis1min > 1000) //every 1 seconds update our data
+	    {
+	    prevMillis1min = millis();
+
+printDateTime(now, 5, 5);
+UpdateClock();
+if (currentPage < 2) 
+{     
+		UpdateTemp();
+}    
+		}
+	}
+
+}  //end void loop()
+
+void waitForIt(int coords[]) //red frame where the button is pressed
+{ 
+    int x1 = coords[0];
+    int y1 = coords[1];
+    int x2 = coords[2];
+    int y2 = coords[3];
+    
+    myGLCD.setColor(255, 0, 0);
+    myGLCD.drawRoundRect(x1, y1, x2, y2);
+    
+    while (myTouch.dataAvailable())
+    {
+        myTouch.read();
+    }
+    
+    myGLCD.setColor(0, 0, 0);
+    myGLCD.drawRoundRect(x1, y1, x2, y2);
+    drawScreen();
+}
+
+bool buttonPressed(int coords[])
+{
+    int x = myTouch.getX();
+    int y = myTouch.getY();
+    
+    return ((x >= coords[0]) && (x <= coords[2]) && (y >= coords[1]) && (y <= coords[3]));
+}
+
+void drawScreen()
+    {
+    if (currentPage != lastScreen)
+	{
+	myGLCD.clrScr(); //clear everything on screenchange
+	}
+    lastScreen = currentPage;
+    switch (currentPage)
+	{
+case 1:
+HomeScreen();
+UpdateTemp();  
+break;
+case 2:
+SettingsScreen();
+break;   
+case 3:
+ClockScreen();
+break;
+case 4:
+HeaterScreen();
+updateHeaterScreen();
+break;
+   }
+}
+
+void printDateTime(const DateTime& dateTime, int x, int y) // Date and time 
+{
+    const char* dayOfWeek = DAYS_OF_WEEK[dateTime.dayOfTheWeek()];
+    const char* monthName = MONTHS[dateTime.month()];
+
+    char dateStr[25];
+    sprintf(dateStr, "%s, %d.%s", dayOfWeek, dateTime.day(), monthName);
+
+    myGLCD.setFont(BigFont);
+    myGLCD.setColor(255, 255, 255);
+    myGLCD.print(dateStr, x, y);
+
+    myGLCD.printNumI(dateTime.hour(), 400, y, 2, 48);
+    myGLCD.print(F(":"), 430, y);
+    myGLCD.printNumI(dateTime.minute(), 445, y, 2, 48);
+
+    myGLCD.setColor(0, 0, 255);
+    myGLCD.drawLine(BUTTON_COORDS[0], y, BUTTON_COORDS[2], y); // -
+    myGLCD.drawLine(BUTTON_COORDS[2], y, BUTTON_COORDS[2], BUTTON_COORDS[3]); // |
+    myGLCD.drawLine(BUTTON_COORDS[0], y, BUTTON_COORDS[0], BUTTON_COORDS[3]); // |
+    myGLCD.drawLine(BUTTON_COORDS[0], BUTTON_COORDS[3], BUTTON_COORDS[2], BUTTON_COORDS[3]); // _
+}
+
+
+
+void HomeScreen() // HomePage
+    { 
+    myGLCD.clrScr();
+    myGLCD.setFont(UbuntuBold);
+    myGLCD.setColor(36, 0, 255);
+    myGLCD.print(F("HOME       "), 77, 40);
+    myGLCD.drawLine(76, 76, 450, 76);    
+    myGLCD.setFont(BigFont);
+    myGLCD.printNumF(HIGH_TEMP, 2, 360, 88);
+    myGLCD.printNumF(LOW_TEMP, 2, 360, 147);    
+   
+myGLCD.fillRoundRect (SettingsButtonCoord[0], SettingsButtonCoord[1], SettingsButtonCoord[2], SettingsButtonCoord[3]);    
+
+}    
+
+
+void SettingsScreen() //Settings Page
+    { 
+    myGLCD.setFont(UbuntuBold);
+    myGLCD.setColor(255, 36, 0);
+    myGLCD.print(F("Nastaveni      "), 77, 40);
+    myGLCD.setColor(255, 255, 255);
+    myGLCD.drawLine(66, 75, 450, 75);
+
+    myFiles.load(ClockCord[0], ClockCord[1], 74, 74, "74Cloc.raw");
+    myFiles.load(HeatCord[0], HeatCord[1], 74, 74, "teplota.raw");
+
+    myGLCD.setColor(col_white.r, col_white.g, col_white.b);
+    myGLCD.drawLine(30, 770, 196, 770);
+    myGLCD.drawLine(284, 770, 450, 770);  
+    }
+
+void UpdateTemp() // update temperature on home page 
+{
+    myGLCD.setFont(SevenSegmentFull);
+    myGLCD.print("o", 300, 80);              // Degree icon
+
+    myGLCD.printNumF(readTemperature(), 2, 135, 95); //245
+    myGLCD.setColor(0, 255, 0);
+
+}
+
+void UpdateClock()
+    {
+    now = rtc.now();
+     
+    }  
+
+void ClockScreen() // Clock Page
+    { 
+
+
+    myFiles.load(HourUp[0], HourUp[1], 48, 48, "48up.raw");
+    myFiles.load(HourDown[0], HourDown[1], 48, 48, "48down.raw");
+    myFiles.load(MinuteUp[0], MinuteUp[1], 48, 48, "48up.raw");
+    myFiles.load(MinuteDown[0], MinuteDown[1], 48, 48, "48down.raw");
+
+    myFiles.load(DayUp[0], DayUp[1], 48, 48, "48up.raw");
+    myFiles.load(DayDown[0], DayDown[1], 48, 48, "48down.raw");
+    myFiles.load(MonthUp[0], MonthUp[1], 48, 48, "48up.raw");
+    myFiles.load(MonthDown[0], MonthDown[1], 48, 48, "48down.raw");
+    myFiles.load(YearUp[0], YearUp[1], 48, 48, "48up.raw");
+    myFiles.load(YearDown[0], YearDown[1], 48, 48, "48down.raw");
+    myFiles.load(SetClockCord[0], SetClockCord[1], 168, 52, "6set.raw");
+
+    myGLCD.setFont(UbuntuBold);
+    myGLCD.setColor(0, 109, 255);
+    myGLCD.print(F("Hodiny       "), 77, 40);
+    myGLCD.setColor(255, 255, 255);
+    myGLCD.drawLine(66, 75, 450, 75);
+
+    TimeUpdate();
+
+    myGLCD.setColor(col_white.r, col_white.g, col_white.b);
+    myGLCD.drawLine(30, 770, 196, 770);
+    myGLCD.drawLine(284, 770, 450, 770);
+
+    }
+void TimeUpdate() //Time update
+    {
+    myGLCD.setFont(UbuntuBold);
+    myGLCD.setColor(255, 255, 255);
+
+    myGLCD.printNumI(adjustTimer.hour(), 100, 260, 2, 48);
+    myGLCD.printNumI(adjustTimer.minute(), 270, 260, 2, 48);
+    myGLCD.printNumI(adjustTimer.day(), 50, 424, 2, 48);
+    myGLCD.printNumI(adjustTimer.month(), 170, 424, 2, 48);
+    myGLCD.printNumI(adjustTimer.year(), 280, 424, 2, 48);
+    }
+
+
+float readTemperature() // Read temp from sensor
+{
+  sensors.requestTemperatures(); // Sends a command to get the temperature
+  float temperature = sensors.getTempCByIndex(0); // Gets the temperature
+
+  if (temperature == DEVICE_DISCONNECTED_C)
+  {
+    Serial.println("Chyba: Nelze přečíst teplotu");
+    return DEVICE_DISCONNECTED_C;
+  }
+  else
+  {
+    return temperature;
+  }
+}
+
+void HeaterScreen() // Setting temperature limits
+    { 
+
+    myGLCD.setFont(UbuntuBold);
+    myGLCD.setColor(219, 0, 85);
+    myGLCD.print(F("Teplota              "), 77, 40);
+
+    myGLCD.drawLine(66, 75, 450, 75);
+    myGLCD.print(F("HORNI LIMIT"), 20, 215);
+    myGLCD.print(F("SPODNI LIMIT"), 20, 385);
+    myGLCD.setColor(col_white.r, col_white.g, col_white.b);
+    myGLCD.drawLine(30, 770, 196, 770);
+    myGLCD.drawLine(284, 770, 450, 770);
+    myFiles.load(powLightOffMinuteUp[0], powLightOffMinuteUp[1], 48, 48, "48up.raw");
+    myFiles.load(powLightOffMinuteDown[0], powLightOffMinuteDown[1], 48, 48, "48down.raw");
+    myFiles.load(powCo2OnMinuteUp[0], powCo2OnMinuteUp[1], 48, 48, "48up.raw");
+    myFiles.load(powCo2OnMinuteDown[0], powCo2OnMinuteDown[1], 48, 48, "48down.raw");
+    myFiles.load(CancelPowerSchedCord[0], CancelPowerSchedCord[1], 168, 52, "6cancel.raw");
+    myFiles.load(SetPowerSchedCord[0], SetPowerSchedCord[1], 168, 52, "6set.raw");
+
+    }
+
+
+void readTempValue()
+    {
+    HIGH_TEMP = (EEPROM.read(0));
+    LOW_TEMP = (EEPROM.read(1));
+ }
+
+void saveTempValue()
+    {
+    EEPROM.write(0, HIGH_TEMP);
+    EEPROM.write(1, LOW_TEMP);
+    }  
+
+void updateHeaterScreen()
+    {
+    myGLCD.setFont(UbuntuBold);
+    myGLCD.setColor(col_white.r, col_white.g, col_white.b);
+    myGLCD.printNumF(HIGH_TEMP, 2, 280, 275);
+    myGLCD.printNumF(LOW_TEMP, 2, 280, 445);
+    }
+
+
+
+void regulace() {
+  unsigned long currentMillis = millis(); // Aktuální čas v millis
+  if (currentMillis - lastRegulaceMillis >= 5000) {
+
+
+/////////////////////////
+float currentTemp = readTemperature();
+
+ if (currentTemp <= LOW_TEMP)
+  {
+    digitalWrite(RELAY_HEATING_PIN, HIGH); 
+  }
+  else if (currentTemp >= (HIGH_TEMP + LOW_TEMP) / 2.0)
+  {
+    digitalWrite(RELAY_HEATING_PIN, LOW);
+  }
+
+  if (currentTemp >= HIGH_TEMP)
+  {
+    digitalWrite(RELAY_COOLING_PIN, HIGH);
+  }
+  else if (currentTemp <= HIGH_TEMP - 0.5)
+  {
+    digitalWrite(RELAY_COOLING_PIN, LOW);
+  }
+///////////////////////
+    lastRegulaceMillis = currentMillis; // Aktualizace času poslední regulace
+  }
+}
